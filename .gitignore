@@ -1,0 +1,6 @@
+*~
+apps/*/ebin
+deps/
+NOTES
+log/
+/apps/kafka_handler/src/kfkt.erl

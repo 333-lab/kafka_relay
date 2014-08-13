@@ -1,0 +1,12 @@
+{application, kafka_relay,
+ [
+  {description, ""},
+  {vsn, "0.1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { kafka_relay_app, []}},
+  {env, []}
+ ]}.

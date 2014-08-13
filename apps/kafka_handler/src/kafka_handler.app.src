@@ -1,0 +1,12 @@
+{application, kafka_handler,
+ [
+  {description, "Kafka protocol handler"},
+  {vsn, "0.1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { kafka_handler_app, []}},
+  {env, []}
+ ]}.
