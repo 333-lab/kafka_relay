@@ -14,7 +14,7 @@
 start_link(Params) ->
   gen_server:start_link(?MODULE, [Params], []).
 
--record(st, {params, clientid, corr_id, sock, rloop}).
+-record(st, {params, clientid, corr_id, sock, rloop, req}).
 
 
 
@@ -24,13 +24,15 @@ init([Params]) ->
   gen_server:cast(self(), connect),
   {ok, State}.
 
-handle_call(metadata, _From,
-            #st{sock=Sock, corr_id=CId, clientid=Client}=State) ->
-
-  Payload = kfkproto:ll_encode(3, 0, CId, Client),
+handle_call({metadata, Topics}, _From,
+            #st{sock=Sock, corr_id=CId, clientid=Client,
+                req=Q}=State) ->
+  Payload = kfkproto:ll_encode(3, 0, CId, Client,
+                               kfkproto:ll_array([kfkproto:ll_str(X) || X <- Topics])),
   lager:debug("Send metadata request ~p", [Payload]),
   gen_tcp:send(Sock, Payload),
-  {reply, ok, State#st{corr_id=CId+1}};
+  NewQ = queue:in({metadata, _From}, Q),
+  {noreply, State#st{corr_id=CId+1, req=NewQ}};
 handle_call(Req, _From, State) ->
   lager:warning("Unhandled call ~p~n", [Req]),
   {reply, State}.
@@ -38,7 +40,7 @@ handle_call(Req, _From, State) ->
 handle_cast(connect, #st{params=P}=State) ->
   Host = get_value(host, P),
   Port = get_value(port, P, 9092),
-  ClientId = kfkproto:ll_string(get_value(client, P)),
+  ClientId = kfkproto:ll_str(get_value(client, P)),
   {ok, Sock} = gen_tcp:connect(Host, Port,
                                [binary, {buffer, 4096}, {packet, raw},
                                 {active, false}],
@@ -47,7 +49,7 @@ handle_cast(connect, #st{params=P}=State) ->
   SPid = self(),
   RPid = spawn_link(fun () -> recv_loop(Sock, SPid) end),
   NewState = State#st{sock=Sock, rloop=RPid,
-                      clientid=ClientId, corr_id=0},
+                      clientid=ClientId, corr_id=0, req=queue:new()},
   {noreply, NewState};
 handle_cast(stop, #st{sock=Sock}=State) ->
   lager:debug("Stop and close connection"),
@@ -57,9 +59,18 @@ handle_cast(Req, State) ->
   lager:warning("Unhandled cast: ~p~n", [Req]),
   {noreply, State}.
 
+handle_info({msg, Payload}, #st{req=Q}=State) ->
+  {{value, WW}, NewQ} = queue:out(Q),
+  decode(WW, Payload),
+  {noreply, State#st{req=NewQ}};
 handle_info(Info, State) ->
   lager:warning("Unhandled info: ~p~n", [Info]),
   {noreply, State}.
+
+decode({metadata, From}, Payload) ->
+  <<_CorrId:32, Message/binary>> = Payload,
+  {Brokers, _Rest} = kfkproto:dec_brokers(Message),
+  gen_server:reply(From, Brokers).
 
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
@@ -72,7 +83,7 @@ terminate(Reason, _State) ->
 recv_loop(Sock, PPid, Len, Buff) ->
   case gen_tcp:recv(Sock, Len) of
     {ok, Payload} ->
-      PPid ! {msg, <<Buff, Payload>>};
+      PPid ! {msg, <<Buff/binary, Payload/binary>>};
     {error, Reason} ->
       lager:error("When recv/4: ~p", [Reason]),
       erlang:exit(Reason) end,
@@ -80,9 +91,9 @@ recv_loop(Sock, PPid, Len, Buff) ->
 
 recv_loop(Sock, PPid) ->
   lager:debug("Recv: ~p", [Sock]),
-  case gen_tcp:recv(Sock, 0) of
-    {ok, Packet} ->
-      lager:debug("Got packet: ~p", [Packet]);
+  case gen_tcp:recv(Sock, 4) of
+    {ok, <<Len:32>>} ->
+      recv_loop(Sock, PPid, Len, <<>>);
     {error, Reason} ->
       lager:error("ERROR When recv/2: ~p", [Reason]),
       erlang:exit(Reason) end,
