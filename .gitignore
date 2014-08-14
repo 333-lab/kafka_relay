@@ -3,4 +3,5 @@ apps/*/ebin
 deps/
 NOTES
 log/
+.rebar/erlcinfo
 /apps/kafka_handler/src/kfkt.erl

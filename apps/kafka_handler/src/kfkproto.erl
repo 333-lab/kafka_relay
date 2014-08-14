@@ -48,9 +48,57 @@ dec_brokers(Brokers, 0, Payload) ->
   {Brokers, Payload};
 dec_brokers(Brokers, N, Payload) ->
   <<NodeId:32, P1/binary>> = Payload,
-  lager:debug("Nodeid: ~p", [NodeId]),
-  lager:debug("Dec: ~p", [P1]),
   {Host, P2} = dec_str(P1),
   <<Port:32, P3/binary>> = P2,
-  lager:debug("Num is: ~p ~p", [N, Host]),
   dec_brokers([[{nodeid, NodeId}, {host, Host}, {port, Port}] | Brokers], N-1, P3).
+
+dec_topics(Payload) ->
+  <<Num:32, Rest/binary>> = Payload,
+  dec_topics([], Num, Rest).
+
+dec_topics(Topics, 0, <<>>) ->
+  Topics;
+dec_topics(Topics, N, Payload) ->
+  <<TEcode:16, P1/binary>> = Payload,
+  {TopicName, P2} = dec_str(P1),
+  {Partitions, Rest} = dec_partitions(P2),
+  Topic = [{topic_ecode, TEcode},
+           {topic_name, TopicName},
+           {partitions, Partitions}],
+  dec_topics([Topic | Topics], N-1, Rest).
+
+
+dec_partitions(Payload) ->
+  <<Num:32, Rest/binary>> = Payload,
+  dec_partitions([], Num, Rest).
+
+dec_partitions(Parts, 0, Rest) ->
+  {Parts, Rest};
+dec_partitions(Parts, N, Payload) ->
+  <<PEcode:16, PID:32, Leader:32, Rest/binary>>=Payload,
+  {Replicas, P1} = dec_int32arr(Rest),
+  {Isr, P2} = dec_int32arr(P1),
+  Part = [{part_ecode, PEcode},
+          {part_id, PID},
+          {leader, Leader},
+          {replicas, Replicas},
+          {isr, Isr}],
+  dec_partitions([Part | Parts],
+                 N-1, P2).
+
+
+dec_int32arr(Payload) ->
+  <<Len:32, Rest/binary>> = Payload,
+  dec_int32arr([], Len, Rest).
+
+dec_int32arr(Arr, 0, Rest) ->
+  {Arr, Rest};
+dec_int32arr(Arr, N, Payload) ->
+  <<E:32, Rest/binary>> = Payload,
+  dec_int32arr([E | Arr], N-1, Rest).
+
+
+dec_metadata(Payload) ->
+  {Brokers, Rest} = dec_brokers(Payload),
+  Topics = dec_topics(Rest),
+  {Brokers, Topics}.

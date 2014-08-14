@@ -69,8 +69,8 @@ handle_info(Info, State) ->
 
 decode({metadata, From}, Payload) ->
   <<_CorrId:32, Message/binary>> = Payload,
-  {Brokers, _Rest} = kfkproto:dec_brokers(Message),
-  gen_server:reply(From, Brokers).
+  {Brokers, Topics} = kfkproto:dec_metadata(Message),
+  gen_server:reply(From, {Brokers, Topics}).
 
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
