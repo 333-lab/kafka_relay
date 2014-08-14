@@ -31,7 +31,7 @@ handle_call({metadata, Topics}, _From,
                                kfkproto:ll_array([kfkproto:ll_str(X) || X <- Topics])),
   lager:debug("Send metadata request ~p", [Payload]),
   gen_tcp:send(Sock, Payload),
-  NewQ = queue:in({metadata, _From}, Q),
+  NewQ = queue:in({metadata_call, _From}, Q),
   {noreply, State#st{corr_id=CId+1, req=NewQ}};
 handle_call(Req, _From, State) ->
   lager:warning("Unhandled call ~p~n", [Req]),
@@ -67,7 +67,7 @@ handle_info(Info, State) ->
   lager:warning("Unhandled info: ~p~n", [Info]),
   {noreply, State}.
 
-decode({metadata, From}, Payload) ->
+decode({metadata_call, From}, Payload) ->
   <<_CorrId:32, Message/binary>> = Payload,
   {Brokers, Topics} = kfkproto:dec_metadata(Message),
   gen_server:reply(From, {Brokers, Topics}).
@@ -78,7 +78,6 @@ code_change(_OldVsn, State, _Extra) ->
 terminate(Reason, _State) ->
   lager:info("Terminate with reason: ~p", [Reason]),
   ok.
-
 
 recv_loop(Sock, PPid, Len, Buff) ->
   case gen_tcp:recv(Sock, Len) of

@@ -6,7 +6,7 @@
 -compile(export_all).
 
 
-%% Low level encoding macro
+%% Low level encoding
 ll_bytes(<<>>) ->
   <<-1:32>>;
 ll_bytes(Bytes) ->
@@ -23,7 +23,6 @@ ll_array(Array) ->
   <<(length(Array)):32, (iolist_to_binary(Array))/binary>>.
 
 
-%% Low level encode functions
 ll_encode(ApiKey, ApiVersion, CorrId, ClientId, Data) ->
   Payload = <<ApiKey:16,
               ApiVersion:16,
@@ -35,6 +34,16 @@ ll_encode(ApiKey, ApiVersion, CorrId, ClientId, Data) ->
 ll_decode(Payload) ->
   <<CorrId:32, Response/binary>> = Payload,
   {CorrId, Response}.
+
+dec_int32arr(Payload) ->
+  <<Len:32, Rest/binary>> = Payload,
+  dec_int32arr([], Len, Rest).
+
+dec_int32arr(Arr, 0, Rest) ->
+  {Arr, Rest};
+dec_int32arr(Arr, N, Payload) ->
+  <<E:32, Rest/binary>> = Payload,
+  dec_int32arr([E | Arr], N-1, Rest).
 
 dec_str(<<Size:16, Rest/binary>>) ->
   <<S:Size/binary, Payload/binary>> = Rest,
@@ -85,17 +94,6 @@ dec_partitions(Parts, N, Payload) ->
           {isr, Isr}],
   dec_partitions([Part | Parts],
                  N-1, P2).
-
-
-dec_int32arr(Payload) ->
-  <<Len:32, Rest/binary>> = Payload,
-  dec_int32arr([], Len, Rest).
-
-dec_int32arr(Arr, 0, Rest) ->
-  {Arr, Rest};
-dec_int32arr(Arr, N, Payload) ->
-  <<E:32, Rest/binary>> = Payload,
-  dec_int32arr([E | Arr], N-1, Rest).
 
 
 dec_metadata(Payload) ->
