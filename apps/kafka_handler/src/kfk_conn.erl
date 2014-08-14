@@ -27,11 +27,18 @@ init([Params]) ->
 handle_call({metadata, Topics}, _From,
             #st{sock=Sock, corr_id=CId, clientid=Client,
                 req=Q}=State) ->
-  Payload = kfkproto:ll_encode(3, 0, CId, Client,
-                               kfkproto:ll_array([kfkproto:ll_str(X) || X <- Topics])),
+  Payload = kfkproto:enc_metadata(CId, Client, Topics),
   lager:debug("Send metadata request ~p", [Payload]),
   gen_tcp:send(Sock, Payload),
-  NewQ = queue:in({metadata_call, _From}, Q),
+  NewQ = queue:in({metadata_call, CId, _From}, Q),
+  {noreply, State#st{corr_id=CId+1, req=NewQ}};
+handle_call({offsets, Topics}, _From,
+            #st{sock=Sock, corr_id=CId, clientid=Client,
+                req=Q}=State) ->
+  Payload = kfkproto:enc_topics_offsets(CId, Client, Topics),
+  lager:debug("Send metadata request ~p", [Payload]),
+  gen_tcp:send(Sock, Payload),
+  NewQ = queue:in({offsets_call, CId, _From}, Q),
   {noreply, State#st{corr_id=CId+1, req=NewQ}};
 handle_call(Req, _From, State) ->
   lager:warning("Unhandled call ~p~n", [Req]),
@@ -47,6 +54,8 @@ handle_cast(connect, #st{params=P}=State) ->
                                5000),
   lager:debug("Got sock: ~p", [Sock]),
   SPid = self(),
+  % Caveat: this process will exit normally on socket error
+  % and send {conn_down, Reason}
   RPid = spawn_link(fun () -> recv_loop(Sock, SPid) end),
   NewState = State#st{sock=Sock, rloop=RPid,
                       clientid=ClientId, corr_id=0, req=queue:new()},
@@ -59,6 +68,17 @@ handle_cast(Req, State) ->
   lager:warning("Unhandled cast: ~p~n", [Req]),
   {noreply, State}.
 
+handle_info({conn_down, Reason}, #st{req=Q}=State) ->
+  lager:warning("Handle reconnect: ~p", [Reason]),
+  case queue:len(Q) of
+    0 -> ok;
+    N ->
+      lager:warning("Going to drop: ~p requests ~p", [N, Q])
+  end,
+  timer:sleep(1000),
+  NewConnState = handle_cast(connect, State),
+  NewState = NewConnState#st{req=queue:new()},
+  {noreply, NewState};
 handle_info({msg, Payload}, #st{req=Q}=State) ->
   {{value, WW}, NewQ} = queue:out(Q),
   decode(WW, Payload),
@@ -67,10 +87,16 @@ handle_info(Info, State) ->
   lager:warning("Unhandled info: ~p~n", [Info]),
   {noreply, State}.
 
-decode({metadata_call, From}, Payload) ->
-  <<_CorrId:32, Message/binary>> = Payload,
+decode({metadata_call, CorrId, From}, Payload) ->
+  %% On badmatch => kafka error?
+  {CorrId, Message} = kfkproto:ll_decode(Payload),
   {Brokers, Topics} = kfkproto:dec_metadata(Message),
-  gen_server:reply(From, {Brokers, Topics}).
+  gen_server:reply(From, {Brokers, Topics});
+decode({offsets_call, CorrId, From}, Payload) ->
+  {CorrId, Message} = kfkproto:ll_decode(Payload),
+  Offsets = kfkproto:dec_offsets(Message),
+  gen_server:reply(From, Offsets).
+
 
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
@@ -82,18 +108,19 @@ terminate(Reason, _State) ->
 recv_loop(Sock, PPid, Len, Buff) ->
   case gen_tcp:recv(Sock, Len) of
     {ok, Payload} ->
-      PPid ! {msg, <<Buff/binary, Payload/binary>>};
+      PPid ! {msg, <<Buff/binary, Payload/binary>>},
+      recv_loop(Sock, PPid);
     {error, Reason} ->
       lager:error("When recv/4: ~p", [Reason]),
-      erlang:exit(Reason) end,
-  recv_loop(Sock, PPid).
+      PPid ! {conn_down, Reason} end.
+
 
 recv_loop(Sock, PPid) ->
   lager:debug("Recv: ~p", [Sock]),
   case gen_tcp:recv(Sock, 4) of
     {ok, <<Len:32>>} ->
-      recv_loop(Sock, PPid, Len, <<>>);
+      recv_loop(Sock, PPid, Len, <<>>),
+      recv_loop(Sock, PPid);
     {error, Reason} ->
       lager:error("ERROR When recv/2: ~p", [Reason]),
-      erlang:exit(Reason) end,
-  recv_loop(Sock, PPid).
+      PPid ! {conn_down, Reason} end.
