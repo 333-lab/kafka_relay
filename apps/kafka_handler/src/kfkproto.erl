@@ -14,14 +14,13 @@ enc_metadata(CorrId, Client, Topics) ->
   ll_encode(3, 0, CorrId, Client, EncodedTopics).
 
 % OffsetRequest => ReplicaId [TopicName [Partition Time MaxNumberOfOffsets]]
-enc_topics_offsets(CorrId, Client, Topics) ->
+% Time = -2 = earliest, -1 = latests
+enc_topics_offsets(CorrId, Client, Topics, Time) ->
   RepId = <<-1:32>>,
-  Time = -1, % -2 = earliest, -1 = latests
-  MaxNumberOfOffsets = 5,
-  Partitions = [350],
+  MaxNumberOfOffsets = 1,
   Payload = ll_array(
               [enc_topic_offsets(Topic, Partitions, Time, MaxNumberOfOffsets)
-               || Topic <- Topics]),
+               || {Topic, Partitions} <- Topics]),
   ll_encode(2, 0, CorrId, Client, <<RepId/binary, Payload/binary>>).
 
 enc_topic_offsets(Topic, Partitions, Time, Max) ->

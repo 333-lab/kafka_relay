@@ -32,10 +32,10 @@ handle_call({metadata, Topics}, _From,
   gen_tcp:send(Sock, Payload),
   NewQ = queue:in({metadata_call, CId, _From}, Q),
   {noreply, State#st{corr_id=CId+1, req=NewQ}};
-handle_call({offsets, Topics}, _From,
+handle_call({offsets, Topics, Time}, _From,
             #st{sock=Sock, corr_id=CId, clientid=Client,
                 req=Q}=State) ->
-  Payload = kfkproto:enc_topics_offsets(CId, Client, Topics),
+  Payload = kfkproto:enc_topics_offsets(CId, Client, Topics, Time),
   lager:debug("Send metadata request ~p", [Payload]),
   gen_tcp:send(Sock, Payload),
   NewQ = queue:in({offsets_call, CId, _From}, Q),
