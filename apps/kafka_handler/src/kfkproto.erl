@@ -28,6 +28,18 @@ enc_topic_offsets(Topic, Partitions, Time, Max) ->
                               || Partition <- Partitions]),
   <<(ll_str(Topic))/binary, EncPartitions/binary>>.
 
+enc_fetch_request(CorrId, Client, Topics) ->
+  ReplicaID = <<-1:32>>,
+  MaxWaitTime = <<10000:32>>,
+  MinBytes = <<1:32>>,
+  MaxBytes = <<(10*1024):32>>,
+  EncTopics = ll_array([<<(ll_str(Topic))/binary,
+                          (ll_array([<<Partition:32, Offset:64, MaxBytes/binary>>
+                                       || {Partition, Offset} <- Partitions]))/binary>>
+                        || {Topic, Partitions} <- Topics]),
+  Payload = <<ReplicaID/binary, MaxWaitTime/binary, MinBytes/binary, EncTopics/binary>>,
+  ll_encode(1, 0, CorrId, Client, Payload).
+
 
 %% High level decoding
 dec_metadata(Payload) ->

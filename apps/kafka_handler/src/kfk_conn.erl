@@ -36,9 +36,16 @@ handle_call({offsets, Topics, Time}, _From,
             #st{sock=Sock, corr_id=CId, clientid=Client,
                 req=Q}=State) ->
   Payload = kfkproto:enc_topics_offsets(CId, Client, Topics, Time),
-  lager:debug("Send metadata request ~p", [Payload]),
+  lager:debug("Send offsets request ~p", [Payload]),
   gen_tcp:send(Sock, Payload),
   NewQ = queue:in({offsets_call, CId, _From}, Q),
+  {noreply, State#st{corr_id=CId+1, req=NewQ}};
+handle_call({fetch, Topics}, _From,
+            #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
+  Payload = kfkproto:enc_fetch_request(CId, Client, Topics),
+  lager:debug("Send fetch request ~p", [Payload]),
+  gen_tcp:send(Sock, Payload),
+  NewQ = queue:in({fetch_call, CId, _From}, Q),
   {noreply, State#st{corr_id=CId+1, req=NewQ}};
 handle_call(Req, _From, State) ->
   lager:warning("Unhandled call ~p~n", [Req]),
@@ -76,7 +83,7 @@ handle_info({conn_down, Reason}, #st{req=Q}=State) ->
       lager:warning("Going to drop: ~p requests ~p", [N, Q])
   end,
   timer:sleep(1000),
-  NewConnState = handle_cast(connect, State),
+  {noreply, NewConnState} = handle_cast(connect, State),
   NewState = NewConnState#st{req=queue:new()},
   {noreply, NewState};
 handle_info({msg, Payload}, #st{req=Q}=State) ->
@@ -95,7 +102,12 @@ decode({metadata_call, CorrId, From}, Payload) ->
 decode({offsets_call, CorrId, From}, Payload) ->
   {CorrId, Message} = kfkproto:ll_decode(Payload),
   Offsets = kfkproto:dec_offsets(Message),
-  gen_server:reply(From, Offsets).
+  gen_server:reply(From, Offsets);
+decode({fetch_call, CorrId, From}, Payload) ->
+  {CorrId, Message} = kfkproto:ll_decode(Payload),
+  gen_server:reply(From, Message).
+
+
 
 
 code_change(_OldVsn, State, _Extra) ->
