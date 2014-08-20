@@ -94,6 +94,10 @@ handle_info(Info, State) ->
   lager:warning("Unhandled info: ~p~n", [Info]),
   {noreply, State}.
 
+decode({fetch_call, CorrId, From}, Payload) ->
+  {CorrId, Message} = kfkproto:ll_decode(Payload),
+  Messages = kfkproto:dec_messages(Message),
+  gen_server:reply(From, Messages);
 decode({metadata_call, CorrId, From}, Payload) ->
   %% On badmatch => kafka error?
   {CorrId, Message} = kfkproto:ll_decode(Payload),
@@ -102,10 +106,7 @@ decode({metadata_call, CorrId, From}, Payload) ->
 decode({offsets_call, CorrId, From}, Payload) ->
   {CorrId, Message} = kfkproto:ll_decode(Payload),
   Offsets = kfkproto:dec_offsets(Message),
-  gen_server:reply(From, Offsets);
-decode({fetch_call, CorrId, From}, Payload) ->
-  {CorrId, Message} = kfkproto:ll_decode(Payload),
-  gen_server:reply(From, Message).
+  gen_server:reply(From, Offsets).
 
 
 

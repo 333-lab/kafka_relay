@@ -54,6 +54,10 @@ dec_offsets(Payload) ->
   {Resp, <<>>} = dec_topics_offsets([], Len, Rest),
   Resp.
 
+dec_messages(Payload) ->
+  {Messages, <<>>} = dec_messages_arr(Payload),
+  Messages.
+
 
 %% Low level encoding
 ll_bytes(<<>>) ->
@@ -107,7 +111,15 @@ dec_int64arr(Arr, N, Payload) ->
   dec_int64arr([E | Arr], N-1, Rest).
 
 
+dec_str(<<255, 255, Payload/binary>>) ->
+  {<<>>, Payload};
 dec_str(<<Size:16, Rest/binary>>) ->
+  <<S:Size/binary, Payload/binary>> = Rest,
+  {S, Payload}.
+
+dec_bytes(<<255, 255, 255, 255, Payload/binary>>) ->
+  {<<>>, Payload};
+dec_bytes(<<Size:32, Rest/binary>>) ->
   <<S:Size/binary, Payload/binary>> = Rest,
   {S, Payload}.
 
@@ -181,3 +193,58 @@ dec_partition_offsets(POffsets, N, Payload) ->
               {part_ecode, ErrCode},
               {offsets, Offsets}],
   dec_partition_offsets([POffset | POffsets], N-1, Rest).
+
+dec_messages_arr(Payload) ->
+  <<Num:32, Rest/binary>> = Payload,
+  dec_messages_arr([], Num, Rest).
+
+dec_messages_arr(Messages, 0, Rest) ->
+  {Messages, Rest};
+dec_messages_arr(Messages, N, Payload) ->
+  {TopicName, P1} = dec_str(Payload),
+  {PMessages, Rest} = dec_partition_messages(P1),
+  Message = [{topic_name, TopicName},
+             {messages, PMessages}],
+  dec_messages_arr([Message | Messages], N-1, Rest).
+
+dec_partition_messages(Payload) ->
+  <<Num:32, Rest/binary>> = Payload,
+  dec_partition_messages([], Num, Rest).
+
+dec_partition_messages(Messages, 0, Rest) ->
+  {Messages, Rest};
+dec_partition_messages(Messages, N, Payload) ->
+  <<Partition:32, ECode:16, HWMark:64, MSetSize:32, P1/binary>> = Payload,
+  <<EMessageSet:MSetSize/binary, Rest/binary>> = P1,
+  MessageSet = dec_msg_set(EMessageSet),
+  Message = [{parition, Partition},
+             {error_code, ECode},
+             {hwmark, HWMark},
+             {mset_size, MSetSize},
+             {mset, MessageSet}
+            ],
+
+  dec_partition_messages([Message | Messages], N-1, Rest).
+
+dec_msg_set(Payload) ->
+  dec_msg_set([], Payload).
+
+dec_msg_set(Messages, <<>>) ->
+  Messages;
+dec_msg_set(Messages, Payload) ->
+  <<Offset:64, Size:32, P1/binary>> = Payload,
+  try
+    <<Msg:Size/binary, Rest/binary>> = P1,
+    Message = [{offset, Offset},
+               {message, dec_msg(Msg)}],
+    dec_msg_set([Message | Messages], Rest)
+  catch
+    error:{badmatch, _R} ->
+      {Messages, <<>>}
+  end.
+
+dec_msg(Payload) ->
+  <<_CRC:32, _Magic:8, _Attrs:8, P1/binary>> = Payload,
+  {Key, P2} = dec_bytes(P1),
+  {Value, _P3} = dec_bytes(P2),
+  [{key, Key}, {value, Value}].
