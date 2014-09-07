@@ -110,9 +110,9 @@ decode({fetch_call, CorrId, From}, Payload) ->
 decode({produce_call, CorrId, From}, Payload) ->
   lager:debug("Produce call pl: ~p", [Payload]),
   {CorrId, Message} = kfkproto:ll_decode(Payload),
-  %Messages = kfkproto:dec_messages(Message),
+  Messages = kfkproto:dec_produce_resp(Message),
   %gen_server:reply(From, Messages);
-  gen_server:reply(From, Message);
+  gen_server:reply(From, Messages);
 decode({metadata_call, CorrId, From}, Payload) ->
   %% On badmatch => kafka error?
   {CorrId, Message} = kfkproto:ll_decode(Payload),

@@ -66,6 +66,12 @@ dec_offsets(Payload) ->
   {Resp, <<>>} = dec_topics_offsets([], Len, Rest),
   Resp.
 
+% [TopicName [Partition ErrorCode Offset]]
+dec_produce_resp(Payload) ->
+  <<Len:32, Rest/binary>> = Payload,
+  {Resp, <<>>} = dec_topics_w_offsets([], Len, Rest),
+  Resp.
+
 dec_messages(Payload) ->
   {Messages, <<>>} = dec_messages_arr(Payload),
   Messages.
@@ -190,7 +196,6 @@ dec_topics(Topics, N, Payload) ->
            {partitions, Partitions}],
   dec_topics([Topic | Topics], N-1, Rest).
 
-
 dec_partitions(Payload) ->
   <<Num:32, Rest/binary>> = Payload,
   dec_partitions([], Num, Rest).
@@ -232,6 +237,29 @@ dec_partition_offsets(POffsets, N, Payload) ->
               {part_ecode, ErrCode},
               {offsets, Offsets}],
   dec_partition_offsets([POffset | POffsets], N-1, Rest).
+
+dec_topics_w_offsets(Topics, 0, Rest) ->
+  {Topics, Rest};
+dec_topics_w_offsets(Topics, N, Payload) ->
+  {TopicName, P1} = dec_str(Payload),
+  {Partitions, Rest} = dec_partitions_offset(P1),
+  Topic = [{topic_name, TopicName},
+           {partitions, Partitions}],
+  dec_topics_offsets([Topic | Topics], N-1, Rest).
+
+
+dec_partitions_offset(Payload) ->
+  <<Num:32, Rest/binary>> = Payload,
+  dec_partitions_offset([], Num, Rest).
+
+dec_partitions_offset(POffsets, 0, Rest) ->
+  {POffsets, Rest};
+dec_partitions_offset(POffsets, N, Payload) ->
+  <<Partition:32, ECode:16, Offset:64, Rest/binary>> = Payload,
+  POffset = [{parition, Partition},
+             {error_code, ECode},
+             {offset, Offset}],
+  dec_partitions_offset([POffset | POffsets], N-1, Rest).
 
 dec_messages_arr(Payload) ->
   <<Num:32, Rest/binary>> = Payload,
