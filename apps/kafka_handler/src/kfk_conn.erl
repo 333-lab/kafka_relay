@@ -24,6 +24,21 @@ init([Params]) ->
   gen_server:cast(self(), connect),
   {ok, State}.
 
+handle_call({fetch, Topics}, _From,
+            #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
+  Payload = kfkproto:enc_fetch_request(CId, Client, Topics),
+  lager:debug("Send fetch request ~p", [Payload]),
+  gen_tcp:send(Sock, Payload),
+  NewQ = queue:in({fetch_call, CId, _From}, Q),
+  {noreply, State#st{corr_id=CId+1, req=NewQ}};
+% RequiredAcks Timeout [TopicName [Partition MessageSetSize MessageSet]]
+handle_call({produce, Acks, Topics}, _From,
+            #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
+  Payload = kfkproto:enc_produce_request(CId, Client, Acks, Topics),
+  lager:debug("Send produce request ~p", [Payload]),
+  gen_tcp:send(Sock, Payload),
+  NewQ = queue:in({produce_call, CId, _From}, Q),
+  {noreply, State#st{corr_id=CId+1, req=NewQ}};
 handle_call({metadata, Topics}, _From,
             #st{sock=Sock, corr_id=CId, clientid=Client,
                 req=Q}=State) ->
@@ -39,13 +54,6 @@ handle_call({offsets, Topics, Time}, _From,
   lager:debug("Send offsets request ~p", [Payload]),
   gen_tcp:send(Sock, Payload),
   NewQ = queue:in({offsets_call, CId, _From}, Q),
-  {noreply, State#st{corr_id=CId+1, req=NewQ}};
-handle_call({fetch, Topics}, _From,
-            #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
-  Payload = kfkproto:enc_fetch_request(CId, Client, Topics),
-  lager:debug("Send fetch request ~p", [Payload]),
-  gen_tcp:send(Sock, Payload),
-  NewQ = queue:in({fetch_call, CId, _From}, Q),
   {noreply, State#st{corr_id=CId+1, req=NewQ}};
 handle_call(Req, _From, State) ->
   lager:warning("Unhandled call ~p~n", [Req]),
@@ -87,6 +95,7 @@ handle_info({conn_down, Reason}, #st{req=Q}=State) ->
   NewState = NewConnState#st{req=queue:new()},
   {noreply, NewState};
 handle_info({msg, Payload}, #st{req=Q}=State) ->
+  lager:debug("Handle reply: ~p", [Payload]),
   {{value, WW}, NewQ} = queue:out(Q),
   decode(WW, Payload),
   {noreply, State#st{req=NewQ}};
@@ -98,6 +107,12 @@ decode({fetch_call, CorrId, From}, Payload) ->
   {CorrId, Message} = kfkproto:ll_decode(Payload),
   Messages = kfkproto:dec_messages(Message),
   gen_server:reply(From, Messages);
+decode({produce_call, CorrId, From}, Payload) ->
+  lager:debug("Produce call pl: ~p", [Payload]),
+  {CorrId, Message} = kfkproto:ll_decode(Payload),
+  %Messages = kfkproto:dec_messages(Message),
+  %gen_server:reply(From, Messages);
+  gen_server:reply(From, Message);
 decode({metadata_call, CorrId, From}, Payload) ->
   %% On badmatch => kafka error?
   {CorrId, Message} = kfkproto:ll_decode(Payload),

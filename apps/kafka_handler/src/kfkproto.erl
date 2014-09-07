@@ -30,15 +30,28 @@ enc_topic_offsets(Topic, Partitions, Time, Max) ->
 
 enc_fetch_request(CorrId, Client, Topics) ->
   ReplicaID = <<-1:32>>,
-  MaxWaitTime = <<10000:32>>,
+  MaxWaitTime = <<4500:32>>, % call timeout
   MinBytes = <<1:32>>,
   MaxBytes = <<(10*1024):32>>,
-  EncTopics = ll_array([<<(ll_str(Topic))/binary,
-                          (ll_array([<<Partition:32, Offset:64, MaxBytes/binary>>
-                                       || {Partition, Offset} <- Partitions]))/binary>>
-                        || {Topic, Partitions} <- Topics]),
-  Payload = <<ReplicaID/binary, MaxWaitTime/binary, MinBytes/binary, EncTopics/binary>>,
+  EncTopics =
+    ll_array([<<(ll_str(Topic))/binary,
+                (ll_array([<<Partition:32, Offset:64, MaxBytes/binary>>
+                             || {Partition, Offset} <- Partitions]))/binary>>
+                || {Topic, Partitions} <- Topics]),
+  Payload = <<ReplicaID/binary, MaxWaitTime/binary,
+              MinBytes/binary, EncTopics/binary>>,
   ll_encode(1, 0, CorrId, Client, Payload).
+
+% Topics = [{TopicName [{Partition Messages}]}]
+enc_produce_request(CorrId, Client, Acks, Topics) ->
+  Timeout = <<4500:32>>, % call timeout
+  EncTopics =
+    ll_array([<<(ll_str(Topic))/binary,
+                (ll_array([<<Partition:32, (enc_msset_payload(Messages))/binary>>
+                             || {Partition, Messages} <- TMessages]))/binary>>
+                || {Topic, TMessages} <- Topics]),
+  Payload = <<Acks:16, Timeout/binary, EncTopics/binary>>,
+  ll_encode(0, 0, CorrId, Client, Payload).
 
 
 %% High level decoding
@@ -49,7 +62,6 @@ dec_metadata(Payload) ->
 
 % [TopicName [PartitionOffsets]]
 dec_offsets(Payload) ->
-  lager:debug("Decode offsets: ~p", [Payload]),
   <<Len:32, Rest/binary>> = Payload,
   {Resp, <<>>} = dec_topics_offsets([], Len, Rest),
   Resp.
@@ -83,6 +95,33 @@ ll_encode(ApiKey, ApiVersion, CorrId, ClientId, Data) ->
               ClientId/binary,
               Data/binary>>,
   <<(byte_size(Payload)):32, Payload/binary>>.
+
+% return <<MessageSetSize, MessageSet>>
+% [MessageSetSize, [Offset MessageSize (Crc MagicByte Attributes Key Value)]]
+enc_msset_payload(Messages) ->
+  {MSetSize, MSet} = enc_msset(Messages),
+  <<MSetSize:32, MSet/binary>>.
+
+enc_msset(Messages) ->
+  enc_msset([], Messages).
+
+enc_msset(Messages, []) ->
+  Payload = binary:list_to_bin(lists:reverse(Messages)),
+  {byte_size(Payload), Payload};
+enc_msset(Messages, [Msg | Rest]) ->
+  EncMsg = enc_msg(Msg),
+  enc_msset([EncMsg | Messages], Rest).
+
+enc_msg(Message) ->
+  Msg = ll_enc_msg(Message),
+  <<0:64, (byte_size(Msg)):32, Msg/binary>>.
+
+% Crc MagicByte Attributes Key Value
+ll_enc_msg(Message) ->
+  {Key, Value} = Message,
+  MsgPl = <<0:8, 0:8, (ll_bytes(Key))/binary, (ll_bytes(Value))/binary>>,
+  lager:debug("MsgPL: ~p", [MsgPl]),
+  <<(erlang:crc32(MsgPl)):32, MsgPl/binary>>.
 
 %% Low level decode funcs
 ll_decode(Payload) ->
