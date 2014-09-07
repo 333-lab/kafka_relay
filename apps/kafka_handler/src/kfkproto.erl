@@ -115,17 +115,27 @@ enc_msset(Messages, []) ->
   Payload = binary:list_to_bin(lists:reverse(Messages)),
   {byte_size(Payload), Payload};
 enc_msset(Messages, [Msg | Rest]) ->
-  EncMsg = enc_msg(Msg),
+  EncMsg = enc_plain_msg(Msg),
   enc_msset([EncMsg | Messages], Rest).
 
-enc_msg(Message) ->
-  Msg = ll_enc_msg(Message),
+enc_gzip_msg(Message) ->
+  Msg = ll_enc_gzip_msg(Message),
+  <<0:64, (byte_size(Msg)):32, Msg/binary>>.
+
+enc_plain_msg(Message) ->
+  Msg = ll_enc_msg(Message, 0),
   <<0:64, (byte_size(Msg)):32, Msg/binary>>.
 
 % Crc MagicByte Attributes Key Value
-ll_enc_msg(Message) ->
+ll_enc_gzip_msg(Message) ->
+  MsgPl = <<0:8, 1:8, (ll_bytes(<<>>))/binary,
+            (ll_bytes(zlib:gzip(enc_plain_msg(Message))))/binary>>,
+  lager:debug("MsgPL: ~p", [MsgPl]),
+  <<(erlang:crc32(MsgPl)):32, MsgPl/binary>>.
+
+ll_enc_msg(Message, Attr) ->
   {Key, Value} = Message,
-  MsgPl = <<0:8, 0:8, (ll_bytes(Key))/binary, (ll_bytes(Value))/binary>>,
+  MsgPl = <<0:8, Attr:8, (ll_bytes(Key))/binary, (ll_bytes(Value))/binary>>,
   lager:debug("MsgPL: ~p", [MsgPl]),
   <<(erlang:crc32(MsgPl)):32, MsgPl/binary>>.
 
@@ -314,4 +324,4 @@ dec_msg(Payload) ->
   <<_CRC:32, _Magic:8, _Attrs:8, P1/binary>> = Payload,
   {Key, P2} = dec_bytes(P1),
   {Value, _P3} = dec_bytes(P2),
-  [{key, Key}, {value, Value}].
+  [{key, Key}, {value, Value}, {attrs, _Attrs}].
