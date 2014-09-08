@@ -18,7 +18,7 @@ init(State) ->
 
 handle_call(Req, _From, State) ->
   lager:warning("Unhandled call ~p~n", [Req]),
-  {reply, State}.
+  {noreply, State}.
 
 handle_cast(Req, State) ->
   lager:warning("Unhandled cast: ~p~n", [Req]),
