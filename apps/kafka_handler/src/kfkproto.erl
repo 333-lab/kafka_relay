@@ -1,3 +1,7 @@
+%% Core naming logic for arrays
+%% [partition, offset] -> partitions_offset
+%% [partition, [offset] -> partitions_offsets
+
 -module(kfkproto).
 -author('Kirill Pinchuk <k_pinchuk@wargaming.net>').
 -vns("0.1").
@@ -69,7 +73,7 @@ dec_offsets(Payload) ->
 % [TopicName [Partition ErrorCode Offset]]
 dec_produce_resp(Payload) ->
   <<Len:32, Rest/binary>> = Payload,
-  {Resp, <<>>} = dec_topics_w_offsets([], Len, Rest),
+  {Resp, <<>>} = dec_produce_topics([], Len, Rest),
   Resp.
 
 dec_messages(Payload) ->
@@ -105,18 +109,19 @@ ll_encode(ApiKey, ApiVersion, CorrId, ClientId, Data) ->
 % return <<MessageSetSize, MessageSet>>
 % [MessageSetSize, [Offset MessageSize (Crc MagicByte Attributes Key Value)]]
 enc_msset_payload(Messages) ->
-  {MSetSize, MSet} = enc_msset(Messages),
+  {MSetSize, MSet} = enc_msg_set(Messages),
   <<MSetSize:32, MSet/binary>>.
 
-enc_msset(Messages) ->
-  enc_msset([], Messages).
 
-enc_msset(Messages, []) ->
+enc_msg_set(Messages) ->
+  enc_msg_set([], Messages).
+
+enc_msg_set(Messages, []) ->
   Payload = binary:list_to_bin(lists:reverse(Messages)),
   {byte_size(Payload), Payload};
-enc_msset(Messages, [Msg | Rest]) ->
+enc_msg_set(Messages, [Msg | Rest]) ->
   EncMsg = enc_plain_msg(Msg),
-  enc_msset([EncMsg | Messages], Rest).
+  enc_msg_set([EncMsg | Messages], Rest).
 
 enc_gzip_msg(Message) ->
   Msg = ll_enc_gzip_msg(Message),
@@ -248,14 +253,16 @@ dec_partition_offsets(POffsets, N, Payload) ->
               {offsets, Offsets}],
   dec_partition_offsets([POffset | POffsets], N-1, Rest).
 
-dec_topics_w_offsets(Topics, 0, Rest) ->
+
+% produce request parsing
+dec_produce_topics(Topics, 0, Rest) ->
   {Topics, Rest};
-dec_topics_w_offsets(Topics, N, Payload) ->
+dec_produce_topics(Topics, N, Payload) ->
   {TopicName, P1} = dec_str(Payload),
   {Partitions, Rest} = dec_partitions_offset(P1),
   Topic = [{topic_name, TopicName},
            {partitions, Partitions}],
-  dec_topics_offsets([Topic | Topics], N-1, Rest).
+  dec_produce_topics([Topic | Topics], N-1, Rest).
 
 
 dec_partitions_offset(Payload) ->
@@ -321,6 +328,7 @@ dec_msg_set(Messages, Payload) ->
   end.
 
 dec_msg(Payload) ->
+  % TODO: handle compressed messages
   <<_CRC:32, _Magic:8, _Attrs:8, P1/binary>> = Payload,
   {Key, P2} = dec_bytes(P1),
   {Value, _P3} = dec_bytes(P2),
