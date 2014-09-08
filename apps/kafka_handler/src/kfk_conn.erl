@@ -1,6 +1,6 @@
 -module(kfk_conn).
 -author('Kirill Pinchuk <k_pinchuk@wargaming.net>').
--vns("0.1").
+-vsn("0.1").
 
 -behaviour(gen_server).
 
@@ -111,7 +111,6 @@ decode({produce_call, CorrId, From}, Payload) ->
   lager:debug("Produce call pl: ~p", [Payload]),
   {CorrId, Message} = kfkproto:ll_decode(Payload),
   Messages = kfkproto:dec_produce_resp(Message),
-  %gen_server:reply(From, Messages);
   gen_server:reply(From, Messages);
 decode({metadata_call, CorrId, From}, Payload) ->
   %% On badmatch => kafka error?

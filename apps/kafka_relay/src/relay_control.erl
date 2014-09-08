@@ -1,6 +1,6 @@
 -module(relay_control).
 -author('Kirill Pinchuk <k_pinchuk@wargaming.net>').
--vns("0.1").
+-vsn("0.1").
 
 -behaviour(gen_server).
 

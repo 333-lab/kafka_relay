@@ -4,7 +4,7 @@
 
 -module(kfkproto).
 -author('Kirill Pinchuk <k_pinchuk@wargaming.net>').
--vns("0.1").
+-vsn("0.1").
 
 %% TODO: fix this
 -compile(export_all).

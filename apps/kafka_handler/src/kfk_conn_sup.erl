@@ -1,6 +1,6 @@
 -module(kfk_conn_sup).
 -author('Kirill Pinchuk <k_pinchuk@wargaming.net>').
--vns("0.1").
+-vsn("0.1").
 
 
 -behaviour(supervisor).
