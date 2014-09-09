@@ -42,7 +42,7 @@ handle_call({produce, Acks, Topics}, _From,
 handle_call({metadata, Topics}, _From,
             #st{sock=Sock, corr_id=CId, clientid=Client,
                 req=Q}=State) ->
-  Payload = kfkproto:enc_metadata(CId, Client, Topics),
+  Payload = kfkproto:enc_metadata_request(CId, Client, Topics),
   lager:debug("Send metadata request ~p", [Payload]),
   gen_tcp:send(Sock, Payload),
   NewQ = queue:in({metadata_call, CId, _From}, Q),
@@ -57,7 +57,7 @@ handle_call({get_consumer_metadata, ConsumerGroup}, _From,
 handle_call({offsets, Topics, Time}, _From,
             #st{sock=Sock, corr_id=CId, clientid=Client,
                 req=Q}=State) ->
-  Payload = kfkproto:enc_topics_offsets(CId, Client, Topics, Time),
+  Payload = kfkproto:enc_offset_request(CId, Client, Topics, Time),
   lager:debug("Send offsets request ~p", [Payload]),
   gen_tcp:send(Sock, Payload),
   NewQ = queue:in({offsets_call, CId, _From}, Q),
@@ -112,21 +112,21 @@ handle_info(Info, State) ->
 
 decode({fetch_call, CorrId, From}, Payload) ->
   {CorrId, Message} = kfkproto:ll_decode(Payload),
-  Messages = kfkproto:dec_messages(Message),
+  Messages = kfkproto:dec_fetch_response(Message),
   gen_server:reply(From, Messages);
 decode({produce_call, CorrId, From}, Payload) ->
   lager:debug("Produce call pl: ~p", [Payload]),
   {CorrId, Message} = kfkproto:ll_decode(Payload),
-  Messages = kfkproto:dec_produce_resp(Message),
+  Messages = kfkproto:dec_produce_response(Message),
   gen_server:reply(From, Messages);
 decode({metadata_call, CorrId, From}, Payload) ->
   %% On badmatch => kafka error?
   {CorrId, Message} = kfkproto:ll_decode(Payload),
-  {Brokers, Topics} = kfkproto:dec_metadata(Message),
+  {Brokers, Topics} = kfkproto:dec_metadata_response(Message),
   gen_server:reply(From, {Brokers, Topics});
 decode({offsets_call, CorrId, From}, Payload) ->
   {CorrId, Message} = kfkproto:ll_decode(Payload),
-  Offsets = kfkproto:dec_offsets(Message),
+  Offsets = kfkproto:dec_offset_response(Message),
   gen_server:reply(From, Offsets);
 decode({consumer_metadata_call, CorrId, From}, Payload) ->
   {CorrId, Message} = kfkproto:ll_decode(Payload),
