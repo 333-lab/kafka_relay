@@ -47,6 +47,13 @@ handle_call({metadata, Topics}, _From,
   gen_tcp:send(Sock, Payload),
   NewQ = queue:in({metadata_call, CId, _From}, Q),
   {noreply, State#st{corr_id=CId+1, req=NewQ}};
+handle_call({get_consumer_metadata, ConsumerGroup}, _From,
+            #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
+  Payload = kfkproto:enc_consumer_metadata_request(CId, Client, ConsumerGroup),
+  lager:debug("Send consumer metadata request ~p", [Payload]),
+  gen_tcp:send(Sock, Payload),
+  NewQ = queue:in({consumer_metadata_call, CId, _From}, Q),
+  {noreply, State#st{corr_id=CId+1, req=NewQ}};
 handle_call({offsets, Topics, Time}, _From,
             #st{sock=Sock, corr_id=CId, clientid=Client,
                 req=Q}=State) ->
@@ -120,6 +127,10 @@ decode({metadata_call, CorrId, From}, Payload) ->
 decode({offsets_call, CorrId, From}, Payload) ->
   {CorrId, Message} = kfkproto:ll_decode(Payload),
   Offsets = kfkproto:dec_offsets(Message),
+  gen_server:reply(From, Offsets);
+decode({consumer_metadata_call, CorrId, From}, Payload) ->
+  {CorrId, Message} = kfkproto:ll_decode(Payload),
+  Offsets = kfkproto:dec_consumer_metadata_response(Message),
   gen_server:reply(From, Offsets).
 
 

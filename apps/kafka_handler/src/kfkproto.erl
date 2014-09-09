@@ -57,6 +57,9 @@ enc_produce_request(CorrId, Client, Acks, Topics) ->
   Payload = <<Acks:16, Timeout/binary, EncTopics/binary>>,
   ll_encode(0, 0, CorrId, Client, Payload).
 
+enc_consumer_metadata_request(CorrId, Client, ConsumerGroup) ->
+  Payload = ll_str(ConsumerGroup),
+  ll_encode(10, 0, CorrId, Client, Payload).
 
 %% High level decoding
 dec_metadata(Payload) ->
@@ -79,6 +82,15 @@ dec_produce_resp(Payload) ->
 dec_messages(Payload) ->
   {Messages, <<>>} = dec_messages_arr(Payload),
   Messages.
+
+% ConsumerMetadataResponse => ErrorCode CoordinatorId CoordinatorHost CoordinatorPort
+dec_consumer_metadata_response(Payload) ->
+  <<ErrCode:16, CoordinatorId:32, Rest/binary>> = Payload,
+  {CoordinatorHost, P1} = dec_str(Rest),
+  <<CoordinatorPort:32>> = P1,
+  [{error_code, ErrCode}, {coordinator_id, CoordinatorId},
+   {coordinator_host, CoordinatorHost},
+   {coordinator_port, CoordinatorPort}].
 
 
 %% Low level encoding
