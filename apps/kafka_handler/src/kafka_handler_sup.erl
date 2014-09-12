@@ -1,3 +1,4 @@
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
 -module(kafka_handler_sup).
 -author('Kirill Pinchuk <k_pinchuk@wargaming.net>').
 -vsn("0.1").
@@ -12,9 +13,8 @@
 
 
 start_link() ->
-  supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-  ConnSup = ?CHILD(kfk_conn_sup, supervisor),
-  {ok, { {one_for_one, 100, 1}, [ConnSup]} }.
-
+    ConnSup = ?CHILD(kfk_conn_sup, supervisor),
+    {ok, { {one_for_one, 100, 1}, [ConnSup]} }.

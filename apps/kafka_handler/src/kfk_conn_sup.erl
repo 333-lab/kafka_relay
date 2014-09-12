@@ -1,3 +1,4 @@
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
 -module(kfk_conn_sup).
 -author('Kirill Pinchuk <k_pinchuk@wargaming.net>').
 -vsn("0.1").
@@ -12,9 +13,8 @@
 
 
 start_link() ->
-  supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-  % {strategy, MaxR, MaxT}
-  KfkConn = ?CHILD(kfk_conn, worker),
-  {ok, { {simple_one_for_one, 1, 1}, [KfkConn]} }.
+    KfkConn = ?CHILD(kfk_conn, worker),
+    {ok, { {simple_one_for_one, 1, 1}, [KfkConn]} }.
