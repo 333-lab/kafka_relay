@@ -1,0 +1,7 @@
+
+* handler/kafka_master
+** TODO Store NodeId in ets
+** TODO Store RawConnection in separate table?
+* TODO routing table
+  who is owner? kafka_master?
+

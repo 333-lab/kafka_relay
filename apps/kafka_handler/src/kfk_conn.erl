@@ -37,14 +37,22 @@ handle_call(Request, From, State) ->
     NewState = send(call, Request, From, State),
     {noreply, NewState}.
 
+connect(Host, Port) ->
+    try
+        {ok, Sock} = gen_tcp:connect(Host, Port,
+                                     [binary, {buffer, 4096}, {packet, raw},
+                                      {active, false}],
+                                     5000)
+    catch
+        _:_ ->
+            connect(Host, Port)
+    end.
+
 handle_cast(connect, #st{params=P}=State) ->
-    Host = get_value(host, P),
+    Host = kafka_utils:ensure_list(get_value(host, P)),
     Port = get_value(port, P, 9092),
     ClientId = kfkproto:ll_str(get_value(client, P)),
-    {ok, Sock} = gen_tcp:connect(Host, Port,
-                                 [binary, {buffer, 4096}, {packet, raw},
-                                  {active, false}],
-                                 5000),
+    {ok, Sock} = connect(Host, Port),
     lager:debug("Got sock: ~p", [Sock]),
     SPid = self(),
     % Caveat: this process will exit normally on socket error
@@ -61,6 +69,7 @@ handle_cast(Req, State) ->
     lager:warning("Unhandled cast: ~p~n", [Req]),
     {noreply, State}.
 
+% From = {Pid, Additional}
 handle_info({kfk, Req, From}, State) ->
     NewState = send(info, Req, From, State),
     {noreply, NewState};
@@ -83,7 +92,8 @@ handle_info({msg, Payload}, #st{req=Q}=State) ->
         call ->
             gen_server:reply(From, Resp);
         info ->
-            From ! Resp;
+            {Pid, Additional} = From,
+            Pid ! {Additional, Resp};
         cast ->
             gen_server:cast(From, Resp)
     end,

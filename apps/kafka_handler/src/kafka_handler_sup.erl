@@ -17,4 +17,5 @@ start_link() ->
 
 init([]) ->
     ConnSup = ?CHILD(kfk_conn_sup, supervisor),
-    {ok, { {one_for_one, 100, 1}, [ConnSup]} }.
+    Master = ?CHILD(kafka_master, worker),
+    {ok, { {one_for_one, 100, 1}, [ConnSup, Master]} }.

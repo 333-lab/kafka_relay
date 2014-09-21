@@ -5,3 +5,4 @@ NOTES
 log/
 .rebar/erlcinfo
 /apps/kafka_handler/src/kfkt.erl
+/dialyzer.plt
