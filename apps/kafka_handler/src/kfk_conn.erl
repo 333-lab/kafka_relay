@@ -11,12 +11,12 @@
 -export([terminate/2]).
 -import(proplists, [get_value/2, get_value/3]).
 
+-record(st, {params, clientid, corr_id, sock, rloop, req}).
+
+
 
 start_link(Params) ->
     gen_server:start_link(?MODULE, [Params], []).
-
--record(st, {params, clientid, corr_id, sock, rloop, req}).
-
 
 
 init([Params]) ->
@@ -30,42 +30,12 @@ handle_call({fetch, Topics}, _From,
     Payload = kfkproto:enc_fetch_request(CId, Client, Topics),
     lager:debug("Send fetch request ~p", [Payload]),
     gen_tcp:send(Sock, Payload),
-    NewQ = queue:in({fetch_call, CId, _From}, Q),
+    NewQ = queue:in({call, fetch, CId, _From}, Q),
     {noreply, State#st{corr_id=CId+1, req=NewQ}};
-                                                % RequiredAcks Timeout [TopicName [Partition MessageSetSize MessageSet]]
-handle_call({produce, Acks, Topics}, _From,
-            #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
-    Payload = kfkproto:enc_produce_request(CId, Client, Acks, Topics),
-    lager:debug("Send produce request ~p", [Payload]),
-    gen_tcp:send(Sock, Payload),
-    NewQ = queue:in({produce_call, CId, _From}, Q),
-    {noreply, State#st{corr_id=CId+1, req=NewQ}};
-handle_call({metadata, Topics}, _From,
-            #st{sock=Sock, corr_id=CId, clientid=Client,
-                req=Q}=State) ->
-    Payload = kfkproto:enc_metadata_request(CId, Client, Topics),
-    lager:debug("Send metadata request ~p", [Payload]),
-    gen_tcp:send(Sock, Payload),
-    NewQ = queue:in({metadata_call, CId, _From}, Q),
-    {noreply, State#st{corr_id=CId+1, req=NewQ}};
-handle_call({get_consumer_metadata, ConsumerGroup}, _From,
-            #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
-    Payload = kfkproto:enc_consumer_metadata_request(CId, Client, ConsumerGroup),
-    lager:debug("Send consumer metadata request ~p", [Payload]),
-    gen_tcp:send(Sock, Payload),
-    NewQ = queue:in({consumer_metadata_call, CId, _From}, Q),
-    {noreply, State#st{corr_id=CId+1, req=NewQ}};
-handle_call({offsets, Topics, Time}, _From,
-            #st{sock=Sock, corr_id=CId, clientid=Client,
-                req=Q}=State) ->
-    Payload = kfkproto:enc_offset_request(CId, Client, Topics, Time),
-    lager:debug("Send offsets request ~p", [Payload]),
-    gen_tcp:send(Sock, Payload),
-    NewQ = queue:in({offsets_call, CId, _From}, Q),
-    {noreply, State#st{corr_id=CId+1, req=NewQ}};
-handle_call(Req, _From, State) ->
-    lager:warning("Unhandled call ~p~n", [Req]),
-    {reply, State}.
+
+handle_call(Request, From, State) ->
+    NewState = send(call, Request, From, State),
+    {noreply, NewState}.
 
 handle_cast(connect, #st{params=P}=State) ->
     Host = get_value(host, P),
@@ -77,8 +47,8 @@ handle_cast(connect, #st{params=P}=State) ->
                                  5000),
     lager:debug("Got sock: ~p", [Sock]),
     SPid = self(),
-                                                % Caveat: this process will exit normally on socket error
-                                                % and send {conn_down, Reason}
+    % Caveat: this process will exit normally on socket error
+    % and send {conn_down, Reason}
     RPid = spawn_link(fun () -> recv_loop(Sock, SPid) end),
     NewState = State#st{sock=Sock, rloop=RPid,
                         clientid=ClientId, corr_id=0, req=queue:new()},
@@ -91,6 +61,9 @@ handle_cast(Req, State) ->
     lager:warning("Unhandled cast: ~p~n", [Req]),
     {noreply, State}.
 
+handle_info({kfk, Req, From}, State) ->
+    NewState = send(info, Req, From, State),
+    {noreply, NewState};
 handle_info({conn_down, Reason}, #st{req=Q}=State) ->
     lager:warning("Handle reconnect: ~p", [Reason]),
     case queue:len(Q) of
@@ -104,36 +77,76 @@ handle_info({conn_down, Reason}, #st{req=Q}=State) ->
     {noreply, NewState};
 handle_info({msg, Payload}, #st{req=Q}=State) ->
     lager:debug("Handle reply: ~p", [Payload]),
-    {{value, WW}, NewQ} = queue:out(Q),
-    decode(WW, Payload),
+    {{value, {RespType, Type, CorrId, From}}, NewQ} = queue:out(Q),
+    Resp = decode(Type, CorrId, Payload),
+    case RespType of
+        call ->
+            gen_server:reply(From, Resp);
+        info ->
+            From ! Resp;
+        cast ->
+            gen_server:cast(From, Resp)
+    end,
     {noreply, State#st{req=NewQ}};
 handle_info(Info, State) ->
     lager:warning("Unhandled info: ~p~n", [Info]),
     {noreply, State}.
 
-decode({fetch_call, CorrId, From}, Payload) ->
+
+% Send API -> State
+send(Type, {produce, Acks, Topics}, From,
+     #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
+    Payload = kfkproto:enc_produce_request(CId, Client, Acks, Topics),
+    lager:debug("Send produce request ~p", [Payload]),
+    gen_tcp:send(Sock, Payload),
+    NewQ = queue:in({Type, produce, CId, From}, Q),
+    State#st{corr_id=CId+1, req=NewQ};
+send(Type, {metadata, Topics}, From,
+            #st{sock=Sock, corr_id=CId, clientid=Client,
+                req=Q}=State) ->
+    Payload = kfkproto:enc_metadata_request(CId, Client, Topics),
+    lager:debug("Send metadata request ~p", [Payload]),
+    gen_tcp:send(Sock, Payload),
+    NewQ = queue:in({Type, metadata, CId, From}, Q),
+    State#st{corr_id=CId+1, req=NewQ};
+send(Type, {get_consumer_metadata, ConsumerGroup}, From,
+            #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
+    Payload = kfkproto:enc_consumer_metadata_request(CId, Client, ConsumerGroup),
+    lager:debug("Send consumer metadata request ~p", [Payload]),
+    gen_tcp:send(Sock, Payload),
+    NewQ = queue:in({Type, consumer_metadata, CId, From}, Q),
+    State#st{corr_id=CId+1, req=NewQ};
+send(Type, {offsets, Topics, Time}, From,
+            #st{sock=Sock, corr_id=CId, clientid=Client,
+                req=Q}=State) ->
+    Payload = kfkproto:enc_offset_request(CId, Client, Topics, Time),
+    lager:debug("Send offsets request ~p", [Payload]),
+    gen_tcp:send(Sock, Payload),
+    NewQ = queue:in({Type, offsets, CId, From}, Q),
+    State#st{corr_id=CId+1, req=NewQ};
+send(Type, Req, From, State) ->
+    lager:warning("Unhandled req ~p ~p ~p", [Type, Req, From]),
+    State.
+
+
+decode(fetch, CorrId, Payload) ->
     {CorrId, Message} = kfkproto:ll_decode(Payload),
-    Messages = kfkproto:dec_fetch_response(Message),
-    gen_server:reply(From, Messages);
-decode({produce_call, CorrId, From}, Payload) ->
+    kfkproto:dec_fetch_response(Message);
+decode(produce, CorrId, Payload) ->
     lager:debug("Produce call pl: ~p", [Payload]),
     {CorrId, Message} = kfkproto:ll_decode(Payload),
-    Messages = kfkproto:dec_produce_response(Message),
-    gen_server:reply(From, Messages);
-decode({metadata_call, CorrId, From}, Payload) ->
+    kfkproto:dec_produce_response(Message);
+decode(metadata, CorrId, Payload) ->
     %% On badmatch => kafka error?
     {CorrId, Message} = kfkproto:ll_decode(Payload),
-    {Brokers, Topics} = kfkproto:dec_metadata_response(Message),
-    gen_server:reply(From, {Brokers, Topics});
-decode({offsets_call, CorrId, From}, Payload) ->
+    % {Brokers, Topics}
+    kfkproto:dec_metadata_response(Message);
+decode(offsets, CorrId, Payload) ->
     {CorrId, Message} = kfkproto:ll_decode(Payload),
-    Offsets = kfkproto:dec_offset_response(Message),
-    gen_server:reply(From, Offsets);
-decode({consumer_metadata_call, CorrId, From}, Payload) ->
+    kfkproto:dec_offset_response(Message);
+decode(consumer_metadata, CorrId, Payload) ->
     {CorrId, Message} = kfkproto:ll_decode(Payload),
-    Offsets = kfkproto:dec_consumer_metadata_response(Message),
-    gen_server:reply(From, Offsets).
-
+    kfkproto:dec_consumer_metadata_response(Message).
 
 
 
