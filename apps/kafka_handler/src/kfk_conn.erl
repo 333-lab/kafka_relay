@@ -26,20 +26,15 @@ init([Params]) ->
     {ok, State}.
 
 
+handle_call(check_connection, _From,
+            #st{rloop=RLoop, params=Params}=State) ->
+    Host = get_value(host, Params),
+    Status = process_info(RLoop, status),
+    Reply = {Host, Status},
+    {reply, Reply, State};
 handle_call(Request, From, State) ->
     NewState = send(call, Request, From, State),
     {noreply, NewState}.
-
-connect(Host, Port) ->
-    try
-        {ok, Sock} = gen_tcp:connect(Host, Port,
-                                     [binary, {buffer, 4096}, {packet, raw},
-                                      {active, false}],
-                                     5000)
-    catch
-        _:_ ->
-            connect(Host, Port)
-    end.
 
 handle_cast(connect, #st{params=P}=State) ->
     Host = kafka_utils:ensure_list(get_value(host, P)),
@@ -138,7 +133,6 @@ send(Type, Req, From, State) ->
     lager:warning("Unhandled req ~p ~p ~p", [Type, Req, From]),
     State.
 
-
 decode(fetch, CorrId, Payload) ->
     {CorrId, Message} = kfkproto:ll_decode(Payload),
     kfkproto:dec_fetch_response(Message);
@@ -166,6 +160,19 @@ code_change(_OldVsn, State, _Extra) ->
 terminate(Reason, _State) ->
     lager:info("Terminate with reason: ~p", [Reason]),
     ok.
+
+% prevent timeouts on connect
+connect(Host, Port) ->
+    try
+        {ok, Sock} = gen_tcp:connect(Host, Port,
+                                     [binary, {buffer, 4096}, {packet, raw},
+                                      {active, false}],
+                                     5000)
+    catch
+        _:_ ->
+            connect(Host, Port)
+    end.
+
 
 recv_loop(Sock, PPid, Len, Buff) ->
     case gen_tcp:recv(Sock, Len) of

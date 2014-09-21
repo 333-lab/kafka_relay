@@ -2,6 +2,8 @@
 * handler/kafka_master
 ** TODO Store NodeId in ets
 ** TODO Store RawConnection in separate table?
+** TODO handle hosts defined by aliases
+   if kafka metadata returns different hostname
 * TODO routing table
   who is owner? kafka_master?
 
