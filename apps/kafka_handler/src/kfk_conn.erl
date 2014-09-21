@@ -25,13 +25,6 @@ init([Params]) ->
     gen_server:cast(self(), connect),
     {ok, State}.
 
-handle_call({fetch, Topics}, _From,
-            #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
-    Payload = kfkproto:enc_fetch_request(CId, Client, Topics),
-    lager:debug("Send fetch request ~p", [Payload]),
-    gen_tcp:send(Sock, Payload),
-    NewQ = queue:in({call, fetch, CId, _From}, Q),
-    {noreply, State#st{corr_id=CId+1, req=NewQ}};
 
 handle_call(Request, From, State) ->
     NewState = send(call, Request, From, State),
@@ -104,6 +97,13 @@ handle_info(Info, State) ->
 
 
 % Send API -> State
+send(Type, {fetch, Topics}, From,
+     #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
+    Payload = kfkproto:enc_fetch_request(CId, Client, Topics),
+    lager:debug("Send fetch request ~p", [Payload]),
+    gen_tcp:send(Sock, Payload),
+    NewQ = queue:in({Type, fetch, CId, From}, Q),
+    State#st{corr_id=CId+1, req=NewQ};
 send(Type, {produce, Acks, Topics}, From,
      #st{sock=Sock, corr_id=CId, clientid=Client, req=Q}=State) ->
     Payload = kfkproto:enc_produce_request(CId, Client, Acks, Topics),
