@@ -5,31 +5,33 @@
 
 -behaviour(gen_server).
 
--export([start_link/0]).
+-export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 -export([code_change/3]).
 -export([terminate/2]).
 
 
--record(st, {hosts, workers}).
+-record(st, {params, hosts, workers}).
 -define(HOSTS_LIMIT, 2).
 
-start_link() ->
+start_link(Params) ->
     % TODO: make not local
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+    MasterName = proplists:get_value(name, Params),
+    gen_server:start_link({local, MasterName}, ?MODULE, [Params], []).
 
-init([]) ->
+init([Params]) ->
+    lager:debug("Params: ~p", [Params]),
     gen_server:cast(self(), init),
     Workers = ets:new(kafka_master, [bag, protected, named_table,
                                      {read_concurrency, true}]),
-    {ok, #st{workers=Workers}}.
+    {ok, #st{workers=Workers, params=Params}}.
 
 handle_call(Req, _From, State) ->
     lager:warning("Unhandled call ~p~n", [Req]),
     {reply, State}.
 
-handle_cast(init, #st{workers=Workers}=State) ->
-    {ok, Hosts} = application:get_env(kafka_handler, hosts),
+handle_cast(init, #st{workers=Workers, params=Params}=State) ->
+    Hosts = proplists:get_value(hosts, Params),
     % Test for uniq, save ordered
     lager:debug("Init hosts: ~p", [Hosts]),
     add_hosts(Hosts, Workers),
